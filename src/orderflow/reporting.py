@@ -6,6 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from .fsutil import ro_uri
 from .publish import target_path
 
 EXAMPLE_QUERIES = {
@@ -26,7 +27,7 @@ EXAMPLE_QUERIES = {
 
 
 def run_example_queries(output_dir: Path) -> dict:
-    conn = sqlite3.connect(f"file:{target_path(output_dir)}?mode=ro", uri=True)
+    conn = sqlite3.connect(ro_uri(target_path(output_dir)), uri=True)
     try:
         out = {}
         for name, sql in EXAMPLE_QUERIES.items():

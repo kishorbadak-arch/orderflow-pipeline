@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 from .errors import PublishError
-from .fsutil import fsync_dir, fsync_path
+from .fsutil import fsync_dir, fsync_path, ro_uri
 from .logging_utils import log
 from .schemas import AGG_COLUMNS, DDL, DIM_CUSTOMER_COLUMNS, FACT_ORDERS_COLUMNS, insert_sql
 from .timeutil import utc_now_iso
@@ -113,7 +113,7 @@ def _swap(staging: Path, target: Path) -> None:
 
 
 def _verify_published(target: Path, tr, run_id: str) -> None:
-    conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+    conn = sqlite3.connect(ro_uri(target), uri=True)
     try:
         _verify(conn, tr, run_id)
     finally:
@@ -139,7 +139,7 @@ def read_published_meta(output_dir: Path) -> dict | None:
     if not target.exists():
         return None
     try:
-        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+        conn = sqlite3.connect(ro_uri(target), uri=True)
         try:
             row = conn.execute(
                 "SELECT run_id, published_at_utc, max_updated_at_utc, content_sha256 FROM publication"
@@ -160,7 +160,7 @@ def publish(output_dir: Path, tr, run_id: str, src_hashes: tuple[str, str], canc
     staging = output_dir / f"{STAGING_PREFIX}{uuid.uuid4().hex[:10]}"
     try:
         _build_staging(staging, tr, run_id, src_hashes, fast)
-        conn = sqlite3.connect(f"file:{staging}?mode=ro", uri=True)
+        conn = sqlite3.connect(ro_uri(staging), uri=True)
         try:
             # The content hash is computed once at build time and re-checked on the final published
             # file (with automatic rollback), so the staging check skips a third full pass.

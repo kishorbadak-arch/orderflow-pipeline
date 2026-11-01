@@ -191,6 +191,31 @@ def new_run_id() -> str:
     return utc_now().strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(4)
 
 
+def pid_alive(pid: int) -> bool:
+    """Is a process with this PID running? (os.kill(pid, 0) would *kill* it on Windows.)"""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return k32.GetLastError() == 5  # access denied: it exists
+        try:
+            code = ctypes.c_ulong()
+            return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 class _Lock:
     """Single-writer guard: one run per output directory at a time (O_EXCL lock file with PID)."""
 
@@ -206,13 +231,9 @@ class _Lock:
                 return self
             except FileExistsError:
                 try:
-                    pid = int(self.path.read_text() or "0")
-                    os.kill(pid, 0)
-                    alive = True
-                except (ValueError, ProcessLookupError):
+                    alive = pid_alive(int(self.path.read_text() or "0"))
+                except ValueError:
                     alive = False
-                except PermissionError:
-                    alive = True
                 if alive:
                     raise LockHeldError("another run is in progress (lock file present)") from None
                 self.path.unlink(missing_ok=True)  # stale lock from a dead process

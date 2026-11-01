@@ -1,0 +1,187 @@
+diff --git a/README.md b/README.md
+index 9b609b3..9b6603b 100644
+--- a/README.md
++++ b/README.md
+@@ -33,6 +33,16 @@ python -m orderflow status --output-dir output            # run + task status fr
+ sqlite3 output/warehouse.sqlite < docs/example_queries.sql   # or any SQLite client
+ ```
+ 
++**Windows (cmd):**
++```cmd
++py -3 -m venv .venv
++.venv\Scripts\activate
++pip install -r requirements-dev.lock.txt
++set PYTHONPATH=src
++python -m orderflow run --input-dir data\sample\input --output-dir output
++python -m pytest
++```
++
+ Exit codes: `0` success (also success-with-warnings) · `1` run failed · `2` bad usage/config · `3` another run in progress.
+ 
+ ## Architecture
+diff --git a/src/orderflow/fsutil.py b/src/orderflow/fsutil.py
+index a6f11b7..1c0119a 100644
+--- a/src/orderflow/fsutil.py
++++ b/src/orderflow/fsutil.py
+@@ -27,7 +27,8 @@ def atomic_write_text(path: Path, text: str, mode: int = 0o600) -> None:
+ 
+ 
+ def fsync_path(path: Path) -> None:
+-    fd = os.open(path, os.O_RDONLY)
++    """fsync a regular file. Opened read/write because Windows refuses to flush a read-only handle."""
++    fd = os.open(path, os.O_RDWR)
+     try:
+         os.fsync(fd)
+     finally:
+@@ -36,6 +37,15 @@ def fsync_path(path: Path) -> None:
+ 
+ def fsync_dir(path: Path) -> None:
+     try:
+-        fsync_path(path)
+-    except OSError:  # not supported on every platform
++        fd = os.open(path, os.O_RDONLY)
++        try:
++            os.fsync(fd)
++        finally:
++            os.close(fd)
++    except OSError:  # directories cannot be opened/flushed this way on Windows
+         pass
++
++
++def ro_uri(path: Path) -> str:
++    """SQLite read-only URI that is valid for Windows paths too (file:///C:/...)."""
++    return Path(path).resolve().as_uri() + "?mode=ro"
+diff --git a/src/orderflow/pipeline.py b/src/orderflow/pipeline.py
+index e44e0ed..49e8e95 100644
+--- a/src/orderflow/pipeline.py
++++ b/src/orderflow/pipeline.py
+@@ -191,6 +191,31 @@ def new_run_id() -> str:
+     return utc_now().strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(4)
+ 
+ 
++def pid_alive(pid: int) -> bool:
++    """Is a process with this PID running? (os.kill(pid, 0) would *kill* it on Windows.)"""
++    if pid <= 0:
++        return False
++    if os.name == "nt":
++        import ctypes
++
++        k32 = ctypes.windll.kernel32
++        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
++        if not handle:
++            return k32.GetLastError() == 5  # access denied: it exists
++        try:
++            code = ctypes.c_ulong()
++            return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
++        finally:
++            k32.CloseHandle(handle)
++    try:
++        os.kill(pid, 0)
++    except ProcessLookupError:
++        return False
++    except PermissionError:
++        return True
++    return True
++
++
+ class _Lock:
+     """Single-writer guard: one run per output directory at a time (O_EXCL lock file with PID)."""
+ 
+@@ -206,13 +231,9 @@ class _Lock:
+                 return self
+             except FileExistsError:
+                 try:
+-                    pid = int(self.path.read_text() or "0")
+-                    os.kill(pid, 0)
+-                    alive = True
+-                except (ValueError, ProcessLookupError):
++                    alive = pid_alive(int(self.path.read_text() or "0"))
++                except ValueError:
+                     alive = False
+-                except PermissionError:
+-                    alive = True
+                 if alive:
+                     raise LockHeldError("another run is in progress (lock file present)") from None
+                 self.path.unlink(missing_ok=True)  # stale lock from a dead process
+diff --git a/src/orderflow/publish.py b/src/orderflow/publish.py
+index 7576111..3ad1189 100644
+--- a/src/orderflow/publish.py
++++ b/src/orderflow/publish.py
+@@ -20,7 +20,7 @@ import uuid
+ from pathlib import Path
+ 
+ from .errors import PublishError
+-from .fsutil import fsync_dir, fsync_path
++from .fsutil import fsync_dir, fsync_path, ro_uri
+ from .logging_utils import log
+ from .schemas import AGG_COLUMNS, DDL, DIM_CUSTOMER_COLUMNS, FACT_ORDERS_COLUMNS, insert_sql
+ from .timeutil import utc_now_iso
+@@ -113,7 +113,7 @@ def _swap(staging: Path, target: Path) -> None:
+ 
+ 
+ def _verify_published(target: Path, tr, run_id: str) -> None:
+-    conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
++    conn = sqlite3.connect(ro_uri(target), uri=True)
+     try:
+         _verify(conn, tr, run_id)
+     finally:
+@@ -139,7 +139,7 @@ def read_published_meta(output_dir: Path) -> dict | None:
+     if not target.exists():
+         return None
+     try:
+-        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
++        conn = sqlite3.connect(ro_uri(target), uri=True)
+         try:
+             row = conn.execute(
+                 "SELECT run_id, published_at_utc, max_updated_at_utc, content_sha256 FROM publication"
+@@ -160,7 +160,7 @@ def publish(output_dir: Path, tr, run_id: str, src_hashes: tuple[str, str], canc
+     staging = output_dir / f"{STAGING_PREFIX}{uuid.uuid4().hex[:10]}"
+     try:
+         _build_staging(staging, tr, run_id, src_hashes, fast)
+-        conn = sqlite3.connect(f"file:{staging}?mode=ro", uri=True)
++        conn = sqlite3.connect(ro_uri(staging), uri=True)
+         try:
+             # The content hash is computed once at build time and re-checked on the final published
+             # file (with automatic rollback), so the staging check skips a third full pass.
+diff --git a/src/orderflow/reporting.py b/src/orderflow/reporting.py
+index b67a51a..5ac7224 100644
+--- a/src/orderflow/reporting.py
++++ b/src/orderflow/reporting.py
+@@ -6,6 +6,7 @@ import json
+ import sqlite3
+ from pathlib import Path
+ 
++from .fsutil import ro_uri
+ from .publish import target_path
+ 
+ EXAMPLE_QUERIES = {
+@@ -26,7 +27,7 @@ EXAMPLE_QUERIES = {
+ 
+ 
+ def run_example_queries(output_dir: Path) -> dict:
+-    conn = sqlite3.connect(f"file:{target_path(output_dir)}?mode=ro", uri=True)
++    conn = sqlite3.connect(ro_uri(target_path(output_dir)), uri=True)
+     try:
+         out = {}
+         for name, sql in EXAMPLE_QUERIES.items():
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 8dc38e6..3b4ac85 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -12,6 +12,7 @@ from pathlib import Path
+ import pytest
+ 
+ from orderflow.config import Config
++from orderflow.fsutil import ro_uri
+ from orderflow.ingest import CUSTOMER_COLUMNS, ORDER_COLUMNS
+ 
+ ROOT = Path(__file__).resolve().parent.parent
+@@ -76,7 +77,7 @@ class Db:
+         self.path = path
+ 
+     def q(self, sql, params=()):
+-        conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
++        conn = sqlite3.connect(ro_uri(self.path), uri=True)
+         try:
+             return conn.execute(sql, params).fetchall()
+         finally:

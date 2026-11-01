@@ -27,7 +27,8 @@ def atomic_write_text(path: Path, text: str, mode: int = 0o600) -> None:
 
 
 def fsync_path(path: Path) -> None:
-    fd = os.open(path, os.O_RDONLY)
+    """fsync a regular file. Opened read/write because Windows refuses to flush a read-only handle."""
+    fd = os.open(path, os.O_RDWR)
     try:
         os.fsync(fd)
     finally:
@@ -36,6 +37,15 @@ def fsync_path(path: Path) -> None:
 
 def fsync_dir(path: Path) -> None:
     try:
-        fsync_path(path)
-    except OSError:  # not supported on every platform
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:  # directories cannot be opened/flushed this way on Windows
         pass
+
+
+def ro_uri(path: Path) -> str:
+    """SQLite read-only URI that is valid for Windows paths too (file:///C:/...)."""
+    return Path(path).resolve().as_uri() + "?mode=ro"

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from orderflow.config import Config
+from orderflow.fsutil import ro_uri
 from orderflow.ingest import CUSTOMER_COLUMNS, ORDER_COLUMNS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -76,7 +77,7 @@ class Db:
         self.path = path
 
     def q(self, sql, params=()):
-        conn = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        conn = sqlite3.connect(ro_uri(self.path), uri=True)
         try:
             return conn.execute(sql, params).fetchall()
         finally:

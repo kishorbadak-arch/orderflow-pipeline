@@ -33,6 +33,16 @@ python -m orderflow status --output-dir output            # run + task status fr
 sqlite3 output/warehouse.sqlite < docs/example_queries.sql   # or any SQLite client
 ```
 
+**Windows (cmd):**
+```cmd
+py -3 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-dev.lock.txt
+set PYTHONPATH=src
+python -m orderflow run --input-dir data\sample\input --output-dir output
+python -m pytest
+```
+
 Exit codes: `0` success (also success-with-warnings) · `1` run failed · `2` bad usage/config · `3` another run in progress.
 
 ## Architecture
