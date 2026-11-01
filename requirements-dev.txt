@@ -1,0 +1,3 @@
+# Direct development dependencies (exact pins)
+pytest==9.2.0
+pip-audit==2.10.1

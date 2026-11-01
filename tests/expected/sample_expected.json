@@ -1,0 +1,21 @@
+{
+  "_comment": "Hand-derived from data/sample/input (see docs/DATA_DICTIONARY.md). Independent of pipeline code.",
+  "counts": {
+    "customers": {"input": 11, "accepted": 7, "rejected": 4},
+    "orders": {"input": 41, "accepted": 32, "rejected": 9},
+    "input_total": 52, "accepted_total": 39, "rejected_total": 13, "output_rows": 39
+  },
+  "rejects": {
+    "customers.csv": {"3": "DUPLICATE_SUPERSEDED", "9": "MISSING_REQUIRED", "10": "INVALID_VALUE", "11": "MALFORMED_ROW"},
+    "orders.csv": {"8": "INVALID_VALUE", "10": "ORDER_BEFORE_SIGNUP", "11": "DISCOUNT_EXCEEDS_GROSS",
+                   "12": "INVALID_REFERENCE", "13": "INVALID_REFERENCE", "15": "DUPLICATE_SUPERSEDED",
+                   "16": "MISSING_REQUIRED", "18": "FUTURE_TIMESTAMP", "19": "MALFORMED_ROW"}
+  },
+  "net_cents_by_currency": {"USD": 130004, "GBP": 2997, "INR": 100000, "EUR": 5000},
+  "recognized_cents_by_currency": {"USD": 130004, "GBP": 2997, "INR": 100000, "EUR": 0},
+  "net_cents_total": 238001,
+  "recognized_cents_total": 233001,
+  "winning_versions": {"customer C000002 email domain/segment": "ENTERPRISE", "order O00000013 status": "DELIVERED"},
+  "timezone_normalisation": {"O00000004": {"order_ts_utc": "2025-02-02T19:00:00.000000Z", "order_date": "2025-02-02"}},
+  "daily_2025_02_02": [["GBP", 1, 3, 2997], ["INR", 1, 10, 100000], ["USD", 1, 1, 2000]]
+}

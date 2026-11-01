@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+# secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# generated outputs (may contain rejected rows) -- never commit
+/output/
+/out/
+/generated/
+*.sqlite
+*.sqlite.prev
+*.sqlite.staging-*
+*.jsonl
+last_failure.json
+.run.lock

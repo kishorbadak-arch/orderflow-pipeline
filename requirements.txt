@@ -1,0 +1,2 @@
+# Runtime: Python standard library only (no third-party packages).
+# Tested with Python 3.12.3; requires >= 3.11 (see pyproject.toml).
